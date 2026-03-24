@@ -1,3 +1,6 @@
+/**
+ * @jest-environment node
+ */
 import { GET } from '@/app/api/health/route';
 
 describe('/api/health Route Handler', () => {
