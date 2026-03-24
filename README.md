@@ -35,25 +35,25 @@ The target architecture relies entirely on Docker Compose and Log-Driven observa
 graph TB
     subgraph Docker Compose Environment
         subgraph Echo-Store Application
-            Front[Store-Frontend\nNext.js]
-            Back[Inventory-API\nFastAPI]
+            Front["Store-Frontend\nNext.js"]
+            Back["Inventory-API\nFastAPI"]
             Front -->|HTTP GET /api/stock| Back
         end
 
         subgraph Log-Driven Observability
-            Loki[Grafana Loki\nLog Database]
-            Promtail[Promtail\nLog Scraper]
-            Graf[Grafana\nDashboard]
+            Loki["Grafana Loki\nLog Database"]
+            Promtail["Promtail\nLog Scraper"]
+            Graf["Grafana\nDashboard"]
         end
     end
 
     subgraph Chaos Subsystem
-        CA[Chaos Agent\nPython (In Development)]
+        CA["Chaos Agent\nPython (In Development)"]
     end
 
     subgraph Autonomous Recovery Subsystem
-        HA[Healer Agent\nPython Orchestrator (In Development)]
-        LLM[Local LLM Brain\nOllama]
+        HA["Healer Agent\nPython Orchestrator (In Development)"]
+        LLM["Local LLM Brain\nOllama"]
     end
 
     CA -.->|Injects faults via Docker SDK| Back
