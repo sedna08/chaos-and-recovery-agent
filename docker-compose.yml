@@ -1,0 +1,81 @@
+version: '3.8'
+
+networks:
+  chaos-net:
+    driver: bridge
+
+services:
+  # -----------------------------------------
+  # Target Application
+  # -----------------------------------------
+  inventory-api:
+    build: 
+      context: ./services/inventory-api
+      dockerfile: Dockerfile
+    container_name: inventory-api
+    networks:
+      - chaos-net
+    ports:
+      - "8000:8000"
+    labels:
+      - "chaos-target=true"
+
+  store-frontend:
+    build: 
+      context: ./services/store-frontend
+      dockerfile: Dockerfile
+    container_name: store-frontend
+    networks:
+      - chaos-net
+    ports:
+      - "3000:3000"
+    environment:
+      # Docker's internal DNS maps the service name 'inventory-api' to its container IP
+      - INVENTORY_API_URL=http://inventory-api:8000
+    depends_on:
+      - inventory-api
+
+  # -----------------------------------------
+  # Observability Micro-Stack
+  # -----------------------------------------
+  loki:
+    image: grafana/loki:2.9.1
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./infra/monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      chaos-net:
+        aliases:
+          - loki-internal
+
+  promtail:
+    image: grafana/promtail:2.9.1
+    container_name: promtail
+    user: root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/monitoring/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - chaos-net
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./infra/monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    networks:
+      - chaos-net
+    depends_on:
+      - loki
