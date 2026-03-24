@@ -1,99 +1,164 @@
-# Design Document: Autonomous Self-Healing Agent Integration via Ollama
+# Functional Design Document: Infrastructure Healer Agent
 
-## 1. System Overview
+## 1. Introduction
 
-The Healing Agent is an autonomous, machine-driven anomaly resolution service integrated within the `chaos-and-recovery-agent` ecosystem. Powered by a local Large Language Model (LLM) via the Ollama platform and its official Python SDK, the agent fundamentally shifts incident management from a reactive, human-driven process to a proactive, self-healing workflow.
+### 1.1 Purpose
 
-The primary objective of the Healing Agent is to continuously monitor system telemetry and logs, detect unhandled exceptions or anomalies, and autonomously generate, validate, and apply corrective actions—ranging from container restarts to code patches. By operating entirely on local hardware or managed internal clusters via Ollama, the system guarantees zero data exfiltration, strict privacy compliance, and circumvents the latency and recurring API costs associated with cloud-based AI providers.
+This document outlines the functional design for the `healer-agent` microservice. As the autonomous Tier-1 responder of the `chaos-and-recovery-agent` ecosystem, its primary role is to monitor system telemetry, diagnose application faults using a local Large Language Model (LLM), and perform infrastructure-level interventions (such as container restarts) to mitigate transient failures.
 
-The agent's development and operational lifecycle strictly adheres to SOLID, DRY, and KISS engineering principles. Furthermore, a rigorous Test-Driven Development (TDD) approach is mandated. The fundamental assumption of the system is that LLM outputs are inherently untrusted and prone to hallucination; therefore, no generative AI output is applied to the live environment without first passing validation.
+### 1.2 Scope
 
-## 2. System Architecture
+The service is strictly scoped to infrastructure orchestration and diagnostic observability. It explicitly **does not** modify, patch, or alter application source code. It serves as an intelligent triage system: resolving operational timeouts automatically while escalating hard-coded logical bugs to human engineers via structured logs.
 
-The Healing Agent abandons monolithic design in favor of a highly decoupled, event-driven microservices architecture. This ensures fault tolerance; the failure of the monitored application will not cascade into the failure of the Healing Agent.
+## 2. Technology Stack
 
-The architecture is built upon three core operational patterns:
+- **Language:** Python 3.12+
+- **AI Inference:** Ollama SDK (Local LLM execution)
+- **Container Orchestration:** Docker SDK for Python
+- **Telemetry Ingestion:** HTTPX (Polling Grafana Loki API)
+- **Data Validation:** Pydantic (Enforcing LLM JSON schemas)
+- **Testing & Linting:** Pytest and Ruff
 
-- **The Observe-Orient-Decide-Act (OODA) Framework:** This continuous feedback loop drives the core workflow. The agent observes telemetry via Loki, orients itself to the error context, decides on a fix via Ollama inference, and acts by executing container operations or staging code patches.
-- **The Orchestrator-Worker Pattern:** To optimize local compute resources, a central Orchestrator LLM (e.g., a lightweight 1.5B/3B model like Llama 3.2 or Qwen) triages incoming errors. Simple operational issues (like connection timeouts requiring restarts) are handled directly. Complex logical faults can be delegated to a larger, more capable Worker model for deep reasoning.
-- **The Reflexion (Self-Healing) Pattern:** Standard linear LLM chains are brittle. If the validation sandbox rejects a proposed code patch (e.g., due to a failed `pytest` run), the resulting stderr output is captured and fed back into the Ollama model. The LLM is prompted to reason about its previous failure and generate a revised patch, looping until the test passes or a retry limit is reached.
+## 3. Component Architecture
 
-## 3. System Components
+The application follows an event-driven, decoupled architectural pattern based on the Observe-Orient-Decide-Act (OODA) loop.
 
-The agent is modularized into specialized, single-responsibility Python components.
+```mermaid
+graph TB
+    subgraph Healer-Agent Microservice
+        Main[OODA Loop Controller]
+        Poller[LokiPoller]
+        Decider[LLMDecider]
+        Executor[DockerExecutor]
+        Logger[AgentLogger]
+    end
 
-### 3.1 Telemetry and Event Watchdog (`LokiPoller`)
+    Loki[(Grafana Loki)] -->|LogQL HTTP Request| Poller
+    Poller --> Main
+    Main -->|Raw Stack Trace| Decider
+    Decider -->|Ollama /api/chat| LocalLLM((llama3.2 Model))
+    LocalLLM -->|Structured JSON Decision| Decider
+    Decider --> Main
 
-This module acts as the sensory input, utilizing an HTTP-based polling mechanism against a local Grafana Loki instance. By executing targeted LogQL queries (e.g., `{container=~"inventory-api"} |= "Exception"`), it continuously extracts raw stack traces and fault payloads. It manages its own state using a high-water mark cursor to prevent redundant processing of historical logs.
+    Main -->|Action: restart| Executor
+    Executor -->|Docker API Socket| DockerDaemon[(Local Docker Daemon)]
 
-### 3.2 Context Builder and AST Analyzer (`ContextBuilder`)
+    Main -->|Action: log_only| Logger
+    Logger -->|Structured Incident Log| Loki
+```
 
-To provide the LLM with localized lexical scope, this module parses the failing application's Abstract Syntax Tree (AST) using Python's built-in `ast` module. It extracts the specific enclosing function or class associated with the stack trace line number. It can also generate vector embeddings of the error to query a historical vector database, appending proven past solutions to the LLM's prompt via Retrieval-Augmented Generation (RAG).
+## 4. Core Capabilities
 
-### 3.3 Ollama Orchestration Client Interface (`LLMDecider`)
+Unlike a standard API, the Healer Agent operates as a background worker. Its capabilities are defined by the operational decisions the LLM is permitted to make.
 
-This module handles inference communication with the local LLM. It constructs dynamic prompts and enforces strict JSON-structured outputs. By leveraging Pydantic, the agent passes `format=RemediationAction.model_json_schema()` to the Ollama API, ensuring the model's response maps deterministically to a structured Python object containing the fields `rationale`, `action`, and `target_container`.
+| Decision Action | Trigger Condition                                                                        | System Response                                                                                     |
+| :-------------- | :--------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
+| `restart`       | Transient infrastructure faults (e.g., connection timeouts, deadlocks, OOM constraints). | Agent utilizes Docker SDK to restart the target container, restoring service availability.          |
+| `log_only`      | Hard-coded application logic faults (e.g., `TypeError`, `KeyError`, syntax errors).      | Agent aborts intervention and outputs a structured diagnostic summary for human engineering review. |
 
-It tracks performance telemetry provided by the Ollama API payload—specifically `eval_count` (output tokens) and `eval_duration` (time spent generating)—to continuously calculate the system's Output Tokens Per Second (TPS) using the following formula:
+## 5. System Workflows
 
-$$TPS = \frac{\text{eval\_count}}{\text{eval\_duration} \times 10^{-9}}$$
+### 5.1 Request Lifecycle (Sequence Diagram)
 
-### 3.4 Execution and Validator Sandbox (`ExecutionSandbox`)
-
-To uphold the TDD mandate, this component intercepts the LLM's proposed code patches and stages them in an ephemeral execution environment using Python's `tempfile` module. It dynamically invokes `pytest` via `subprocess.run` to execute existing and newly generated regression tests against the patched code.
-
-- **Success:** If the exit code is 0, the patch is verified.
-- **Failure:** The module intercepts the failed assertion data (stderr), which can trigger the Reflexion loop.
-- **TDD Mocking Layer:** For testing the agent itself, this module heavily utilizes `pytest-mock` and `unittest.mock.patch` to intercept subprocess calls and API requests, injecting simulated outputs without relying on non-deterministic LLM behavior.
-
-## 4. Sequence Diagrams
-
-The following sequence illustrates the autonomous loop initiated when an anomaly is detected.
+This diagram illustrates the autonomous flow of anomaly detection and remediation.
 
 ```mermaid
 sequenceDiagram
-    participant App as Monitored Application
+    participant App as Monitored Container
     participant Watchdog as LokiPoller
-    participant Context as ContextBuilder
     participant Ollama as LLMDecider
-    participant Sandbox as ExecutionSandbox / DockerExecutor
+    participant Exec as DockerExecutor
+    participant Log as AgentLogger
 
-    App-->>Watchdog: Throws Unhandled Exception (stdout/stderr to Loki)
-    Watchdog->>Context: Push raw stack trace payload
-    Context->>Context: Parse AST & locate failing function
-    Context->>Context: RAG Query for historical fixes
-    Context->>Ollama: Formatted Prompt + AST Context
+    App-->>Watchdog: Throws Unhandled Exception
+    Watchdog->>Ollama: Forward Log Payload
 
     rect rgb(240, 240, 240)
-        Note over Ollama, Sandbox: Decision & Action Loop
-        Ollama->>Ollama: Inference (Enforced JSON Pydantic Schema)
+        Note over Ollama, Exec: Triage & Decision Phase
+        Ollama->>Ollama: Analyze Trace (Enforce JSON Schema)
 
-        alt Action == "restart"
-            Ollama->>Sandbox: Deliver RemediationAction(restart)
-            Sandbox->>App: Execute container restart via DockerExecutor
-        else Action == "patch"
-            Ollama->>Sandbox: Deliver code patch
-            Sandbox->>Sandbox: Apply patch to ephemeral clone
-            Sandbox->>Sandbox: Execute pytest suite
-
-            alt Tests Fail
-                Sandbox-->>Ollama: Return stderr & failing test assertions
-                Ollama->>Ollama: Analyze failure (Self-Correction)
-            else Tests Pass
-                Sandbox->>App: Deploy verified patch
-            end
+        alt is Transient Fault
+            Ollama-->>Exec: action="restart"
+            Exec->>App: container.restart()
+            Exec->>Log: Log successful mitigation
+        else is Logical Bug
+            Ollama-->>Log: action="log_only"
+            Log->>Log: Output structured diagnostic payload
         end
     end
 ```
 
-## 5. Interfaces with Local Docker Environment
+### 5.2 Internal Logic (Activity Flow Diagram)
 
-The Healing Agent heavily interfaces with the local containerized infrastructure to monitor applications, execute remediation tactics, and spin up secure validation environments.
+This diagram maps the continuous polling and cursor-management process of the main loop.
 
-- **Python Docker SDK Integration (`DockerExecutor`):** The agent utilizes the `docker` library to interact programmatically with the local Docker daemon. Using `client = docker.from_env()`, the agent can issue automated `client.containers.get('service_name').restart()` commands to mitigate unresponsive services, or spin up isolated containers for sandboxing.
+```mermaid
+flowchart TD
+    Start(( )) --> InitializeCursor
 
-- **LogQL and Grafana Loki Telemetry:** For monitoring the existing Docker environment, the `LokiPoller` queries the local Grafana Loki API. By querying specific labels, the agent programmatically tails container logs to detect application crashes without needing direct access to the container filesystems.
+    InitializeCursor -->|Sleep 15s| PollLoki
 
-- **Ollama Container Configuration:** To ensure the local Ollama LLM does not introduce high latency during the "Orient" and "Decide" phases, the Ollama Docker container should be explicitly configured with the `OLLAMA_KEEP_ALIVE=24h` (or `-1`) environment variable. This forces the container to permanently pin the LLM weights inside the GPU VRAM, dropping the `load_duration` metric to zero and enabling near-instantaneous inference.
+    PollLoki --> CheckResults{Errors Found?}
+    CheckResults -->|No| PollLoki
+
+    CheckResults -->|Yes: Max TS + 1ns| UpdateCursor
+    UpdateCursor --> TriageLLM
+
+    TriageLLM --> RouteDecision{Action Type?}
+    RouteDecision -->|restart| RestartContainer
+    RouteDecision -->|log_only| LogDiagnosis
+
+    RestartContainer --> PollLoki
+    LogDiagnosis --> PollLoki
+```
+
+## 6. Development & Quality Assurance Flow
+
+To enforce code quality, the service utilizes Ruff and Pytest. The following flowchart dictates the required steps for modifying this service.
+
+```mermaid
+flowchart TD
+    Start([Developer Modifies Code]) --> RunRuff[Run uv run ruff check .]
+
+    RunRuff --> CheckLint{Passes?}
+    CheckLint -->|No| FixLint[Fix Syntax/Formatting]
+    FixLint --> RunRuff
+
+    CheckLint -->|Yes| RunPytest[Run uv run pytest]
+    RunPytest --> CheckTests{Passes?}
+
+    CheckTests -->|No| FixTests[Fix Logic/Assertions]
+    FixTests --> RunPytest
+
+    CheckTests -->|Yes| RunAgent[Execute uv run python -m src.main]
+    RunAgent --> End([Ready for Operation])
+```
+
+## 7. Project Directory Structure
+
+The following tree represents the internal structure of the `healer-agent/` directory within the monorepo. It explicitly separates external integrations (Docker, LLM, Loki) into single-responsibility modules.
+
+```text
+healer-agent/
+├── pyproject.toml               # Configuration for Ruff, Pytest, and dependencies
+├── uv.lock                      # Deterministic dependency resolution
+├── src/                         # Main application source code
+│   ├── __init__.py
+│   ├── main.py                  # Core OODA loop implementation
+│   ├── models.py                # Pydantic schemas (RemediationAction)
+│   ├── logger.py                # Structured JSON logging utility
+│   ├── loki_client.py           # HTTP polling and cursor management
+│   ├── llm_client.py            # Ollama interface and prompt engineering
+│   └── docker_client.py         # Infrastructure intervention execution
+└── tests/                       # Unit test directory
+    ├── __init__.py
+    ├── test_loki_client.py      # Mocks HTTPX and verifies cursor logic
+    ├── test_llm_client.py       # Mocks Ollama and verifies Pydantic parsing
+    └── test_docker_client.py    # Mocks Docker daemon interactions
+```
 
 ---
+
+```
+
+```
