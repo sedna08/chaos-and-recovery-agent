@@ -105,8 +105,8 @@ To run the available infrastructure locally, you will need the following install
 1.  Clone the repository:
 
     ```bash
-    git clone <your-repo-url>
-    cd automated-chaos-recovery
+    git clone https://github.com/sedna08/chaos-and-recovery-agent.git
+    cd chaos-and-recovery-agent
     ```
 
 2.  Boot the infrastructure and microservices:
