@@ -16,6 +16,16 @@ _A closed-loop autonomous ecosystem demonstrating advanced Site Reliability Engi
 
 ---
 
+## 🌟 Highlights
+
+This project fundamentally shifts incident management from a reactive, human-driven process to a proactive, autonomous workflow within a localized sandbox.
+
+- **Closed-Loop SRE:** Features both a manual/automated fault injector (Chaos) and an autonomous first responder (Healer) operating in tandem.
+- **Absolute Privacy:** Powered entirely by local LLMs via Ollama. Zero data exfiltration to external cloud APIs.
+- **Sanitized Telemetry:** Uses a lightweight, unified log-driven observability stack (Grafana Loki + Telegraf `logfmt`) instead of memory-heavy metric databases like Prometheus.
+- **Safe Interventions:** The Healer Agent is strictly limited to infrastructure orchestration (e.g., Docker container restarts). Hard-coded application logic bugs are safely diagnosed and escalated to human engineers.
+- **Zero-Cost Local Environment:** The entire ecosystem runs seamlessly on your local machine using Docker Compose.
+
 ## 📖 About the Project
 
 This monorepo houses a complete, zero-cost, local engineering environment. It is designed to prove that Local Large Language Models (LLMs) can be securely integrated into operational pipelines to handle Level 1 / Level 2 incident response autonomously.
@@ -151,9 +161,9 @@ To run the available infrastructure locally, you will need the following install
 
 Detailed functional specifications and service-level READMEs can be found below:
 
-- [System Functional Design Document](https://www.google.com/search?q=docs/functional_design_document.md)
-- [Healer Agent Documentation](https://www.google.com/search?q=agents/healer-agent/README.md)
-- [Store Frontend Documentation](https://www.google.com/search?q=services/store-frontend/README.md)
-- [Inventory API Documentation](https://www.google.com/search?q=services/inventory-api/README.md)
+- [System Functional Design Document](docs/functional_design_document.md)
+- [Healer Agent Documentation](agents/healer-agent/README.md)
+- [Store Frontend Documentation](services/store-frontend/README.md)
+- [Inventory API Documentation](services/inventory-api/README.md)
 
 <!-- end list -->
