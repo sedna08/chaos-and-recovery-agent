@@ -112,7 +112,6 @@ To run the available infrastructure locally, you will need the following install
 2.  Boot the infrastructure and microservices:
 
     ```bash
-    cd infra
     docker compose up -d
     ```
 
