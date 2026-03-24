@@ -82,7 +82,7 @@ To verify the agent is working correctly, you can trigger a manual error in the 
 Send a log line to a container that matches the LogQL filter `{container=~"inventory-api|store-frontend"} |= "Exception"`:
 
 ```bash
-docker logs inventory-api > /dev/null && echo "ERROR: Exception: Connection timeout in database pool" > /proc/1/fd/1
+docker exec inventory-api sh -c 'echo "ERROR: Exception: Connection timeout in database pool" > /proc/1/fd/1'
 ```
 
 _(Note: This command simulates an exception message directly into the container's stdout, which Loki will ingest and the Healer Agent will intercept.)_
