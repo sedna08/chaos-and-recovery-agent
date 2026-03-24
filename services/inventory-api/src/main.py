@@ -35,8 +35,9 @@ async def get_stock():
     log_info({"endpoint": "/api/stock"}, "Stock inventory requested")
     try:
         data = get_inventory()
+        # Updated: Log the count of items rather than dictionary keys
         log_info(
-            {"item": data.get("item"), "qty": data.get("qty")},
+            {"items_count": len(data)},
             "Successfully fetched inventory",
         )
         return data
