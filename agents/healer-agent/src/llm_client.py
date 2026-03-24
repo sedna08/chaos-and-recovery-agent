@@ -9,29 +9,28 @@ class LLMDecider:
 
     def analyze_error(self, error_log: str, container_name: str) -> RemediationAction | None:
         prompt = (
-            f"The container '{container_name}' has crashed with the following error:\n"
-            f"{error_log}\n"
-            f"Analyze the error. If the container requires a restart to recover, set action to 'restart'. "
-            f"Provide your rationale."
+            f"You are an autonomous SRE agent managing a Dockerized environment.\n"
+            f"The container '{container_name}' threw this error: \n{error_log}\n\n"
+            f"Determine the root cause. If this is a transient infrastructure issue "
+            f"(e.g., connection timeout, memory leak, deadlock) that can be temporarily mitigated "
+            f"by restarting the service, set action to 'restart'.\n"
+            f"If this is a syntax error or a hard-coded logical bug in the application code "
+            f"(e.g., TypeError, KeyError, unhandled null value), you cannot fix it. "
+            f"Provide a clear diagnosis of the bug and set action to 'log_only'."
         )
         
-        logger.info({"container": container_name, "model": self.model_name}, "Requesting LLM remediation decision")
+        logger.info({"container": container_name}, "Requesting LLM infrastructure triage")
 
         try:
             response = chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 format=RemediationAction.model_json_schema(),
-                options={"temperature": 0.0}
+                options={"temperature": 0.0} # Keep it deterministic
             )
             
-            action = RemediationAction.model_validate_json(response.message.content)
-            logger.info({"action": action.action, "target": action.target_container}, "LLM decision received")
-            return action
+            return RemediationAction.model_validate_json(response.message.content)
             
-        except ValidationError as e:
-            logger.error({"error": str(e)}, "LLM returned malformed JSON schema")
-            return None
         except Exception as e:
             logger.error({"error": str(e)}, "LLM inference failed")
             return None

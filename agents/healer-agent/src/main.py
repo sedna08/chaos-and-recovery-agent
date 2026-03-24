@@ -5,7 +5,7 @@ from src.docker_client import DockerExecutor
 from src.logger import logger
 
 def run_healer_agent():
-    logger.info({}, "Starting Healer Agent Subsystem")
+    logger.info({}, "Starting Infrastructure Healer Agent")
     
     poller = LokiPoller("http://localhost:3100")
     decider = LLMDecider("llama3.2")
@@ -22,8 +22,22 @@ def run_healer_agent():
             
             decision = decider.analyze_error(error_log, container_name)
             
-            if decision and decision.action == "restart":
+            if not decision:
+                continue
+                
+            if decision.action == "restart":
+                logger.warning(
+                    {"container": container_name, "diagnosis": decision.diagnosis}, 
+                    "Transient fault detected. Intervening via Docker restart."
+                )
                 executor.restart_container(decision.target_container)
+                
+            elif decision.action == "log_only":
+                # The agent correctly identifies it shouldn't touch the code
+                logger.error(
+                    {"container": container_name, "investigation_result": decision.diagnosis}, 
+                    "Application code fault detected. Intervention aborted. Engineer required."
+                )
                 
         time.sleep(15)
 
