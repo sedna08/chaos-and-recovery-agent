@@ -138,27 +138,23 @@ This is the standard Next.js App Router structure, tailored for your monorepo un
 
 ````text
 store-frontend/
-├── .eslintrc.json               # ESLint configuration
-├── next.config.mjs              # Next.js compiler settings
-├── package.json                 # Node dependencies (next, react, typescript)
-├── tsconfig.json                # TypeScript configuration
-├── tailwind.config.ts           # Tailwind CSS configuration
-├── Dockerfile                   # Multi-stage build instructions for optimized Node image
-│
-├── app/                         # Next.js App Router directory
-│   ├── layout.tsx               # Root HTML structure and global CSS imports
-│   ├── page.tsx                 # Server Component: Fetches backend data
-│   ├── error.tsx                # Client Component: Error boundary UI
-│   ├── loading.tsx              # Fallback UI while SSR is processing
-│   ├── globals.css              # Tailwind directives
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── health/
+│   │   │       └── route.ts         <-- Health check endpoint
+│   │   ├── error.tsx                <-- Global Error Boundary
+│   │   └── page.tsx                 <-- Gateway Server Component (Home)
 │   │
-│   └── api/                     # Next.js Route Handlers
-│       └── health/
-│           └── route.ts         # K8s liveness endpoint
+│   ├── components/
+│   │   └── ui/
+│   │       ├── InventoryTable.tsx   <-- UI Component
+│   │       └── StatusBadge.tsx      <-- UI Component
+│   │
+│   └── lib/
+│       └── logger.ts                <-- Logger Utility
 │
-└── components/                  # Reusable UI components
-    └── ui/
-        ├── StatusBadge.tsx      # Visual indicator of system health
-        └── InventoryTable.tsx   # Client component to display data
-```d
+├── next.config.ts                   <-- Config stays at the root
+└── package.json                     <-- Package.json stays at the root
+```
 ````
