@@ -6,6 +6,9 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker)](https://www.docker.com/)
 [![Observability](https://img.shields.io/badge/Grafana-Loki-F46800.svg?logo=grafana)](https://grafana.com/oss/loki/)
 
+> **Disclaimer: Active Development**
+> The target microservices environment (Echo-Store) and the log-driven observability infrastructure are fully containerized and operational. The Python-based AI agents (Chaos Agent and Healer Agent) described in this documentation are currently under active development and are not yet included in the repository.
+
 A closed-loop autonomous system demonstrating advanced Site Reliability Engineering (SRE) and DevOps principles. This project features a local microservices environment, a Python-based Chaos Agent that intentionally injects system faults, and a Healer Agent powered by a local Large Language Model (LLM) that detects, diagnoses, and autonomously remediates the failures.
 
 ## Table of Contents
@@ -16,18 +19,17 @@ A closed-loop autonomous system demonstrating advanced Site Reliability Engineer
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-- [Usage](#usage)
 - [Documentation](#documentation)
 
 ## About the Project
 
 This monorepo houses a complete, zero-cost, local engineering environment. It is designed to prove that LLMs can be securely integrated into operational pipelines to handle Level 1 / Level 2 incident response autonomously.
 
-The environment consists of a dummy application ("Echo-Store") monitored by a log-driven observability stack. When the Chaos Agent breaks a component, the Healer Agent polls the log database for anomalies, feeds the error context to a local instance of Ollama, and executes the LLM's recommended Docker SDK commands to restore the system.
+The environment consists of a dummy application ("Echo-Store") monitored by a log-driven observability stack. The planned architecture includes a Chaos Agent to break components, and a Healer Agent that polls the log database for anomalies, feeds the error context to a local instance of Ollama, and executes Docker SDK commands to restore the system.
 
 ## System Architecture
 
-The architecture relies entirely on Docker Compose and Log-Driven observability to maintain a minimal compute footprint.
+The target architecture relies entirely on Docker Compose and Log-Driven observability to maintain a minimal compute footprint.
 
 ```mermaid
 graph TB
@@ -46,24 +48,24 @@ graph TB
     end
 
     subgraph Chaos Subsystem
-        CA[Chaos Agent\nPython]
+        CA[Chaos Agent\nPython (In Development)]
     end
 
     subgraph Autonomous Recovery Subsystem
-        HA[Healer Agent\nPython Orchestrator]
+        HA[Healer Agent\nPython Orchestrator (In Development)]
         LLM[Local LLM Brain\nOllama]
     end
 
-    CA -->|Injects faults via Docker SDK| Back
+    CA -.->|Injects faults via Docker SDK| Back
     Front -->|Emits stdout/stderr| Promtail
     Back -->|Emits stdout/stderr| Promtail
     Promtail -->|Pushes logs| Loki
     Loki -->|Visualizes logs| Graf
 
-    HA -->|Polls for Errors| Loki
-    HA -->|Prompts with Context| LLM
-    LLM -->|Returns JSON Action| HA
-    HA -->|Executes Remediation| Docker_Compose_Environment
+    HA -.->|Polls for Errors| Loki
+    HA -.->|Prompts with Context| LLM
+    LLM -.->|Returns JSON Action| HA
+    HA -.->|Executes Remediation| Docker_Compose_Environment
 ```
 
 ## Project Structure
@@ -72,7 +74,7 @@ This monorepo separates the target application, the infrastructure configuration
 
 ```text
 .
-├── agents/                      # Python AI and Automation scripts
+├── agents/                      # Python AI and Automation scripts (Pending)
 │   ├── chaos-agent/             # Injects compute and state faults
 │   └── healer-agent/            # Polls Loki and queries Ollama
 │
@@ -84,19 +86,19 @@ This monorepo separates the target application, the infrastructure configuration
 │   └── store-frontend/          # Next.js SSR frontend gateway
 │
 ├── docs/                        # Architectural diagrams and specifications
-└── docker-compose.yml           # Core infrastructure definition
+├── docker-compose.yml           # Core infrastructure definition
+└── README.md                    # Project documentation
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-To run this system locally, you will need the following installed on your machine:
+To run the available infrastructure locally, you will need the following installed on your machine:
 
 - Docker Desktop (or Docker Engine + Docker Compose plugin)
-- Python 3.12+ (for running the Agents)
+- Python 3.12+ (for future agent execution)
 - Node.js 20.x+ (for frontend development)
-- [Ollama](https://ollama.com/) (running locally with `llama3` or `mistral` pulled)
 
 ### Installation
 
@@ -114,30 +116,14 @@ To run this system locally, you will need the following installed on your machin
     docker compose up -d
     ```
 
-3.  Verify the observability stack is active by navigating to Grafana at `http://localhost:3001`.
+3.  Verify the target health by navigating to the Store Frontend at `http://localhost:3000` to ensure the application is successfully fetching data from the Inventory API.
 
-4.  Install dependencies for the Python agents:
-
-    ```bash
-    # From the root directory
-    cd agents/healer-agent
-    pip install -r requirements.txt
-
-    cd ../chaos-agent
-    pip install -r requirements.txt
-    ```
-
-## Usage
-
-1.  **Verify Target Health:** Navigate to the Store Frontend at `http://localhost:3000` to ensure the application is successfully fetching data from the Inventory API.
-2.  **Start the Healer Agent:** In a new terminal, run the Healer Agent to begin polling Grafana Loki for error signatures.
-3.  **Inject Chaos:** In another terminal, execute the Chaos Agent script to terminate or throttle the `inventory-api` container.
-4.  **Observe Autonomous Recovery:** Watch the Healer Agent detect the resulting 502/504 errors in the Loki stream, query the local Ollama instance, and execute the Docker recovery command automatically.
+4.  Verify the observability stack is active by navigating to Grafana at `http://localhost:3001`.
 
 ## Documentation
 
 Detailed functional specifications and service-level READMEs can be found below:
 
-- [System Functional Design Document](docs/functional_design_document.md)
-- [Store Frontend Documentation](services/store-frontend/README.md)
-- [Inventory API Documentation](services/inventory-api/README.md)
+- [System Functional Design Document](https://www.google.com/search?q=docs/functional_design_document.md)
+- [Store Frontend Documentation](https://www.google.com/search?q=services/store-frontend/README.md)
+- [Inventory API Documentation](https://www.google.com/search?q=services/inventory-api/README.md)
