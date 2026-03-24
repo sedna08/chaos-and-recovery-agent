@@ -11,32 +11,43 @@ def run_healer_agent():
     decider = LLMDecider("llama3.2")
     executor = DockerExecutor()
     
-    logql_query = '{container=~"inventory-api|store-frontend"} |= "Exception"'
+    # Query 1: The standard application error logs
+    app_logql = '{container=~"inventory-api|store-frontend"} |= "Exception"'
+    
+    # Query 2: The new Telegraf metric logs (filtering for > 90% CPU usage)
+    # Updated OODA Loop Query
+    # 1. Select the debug stream
+    # 2. Parse the key-value pairs (logfmt)
+    # 3. Filter by the name we moved into the body
+    # 4. Check the usage threshold
+    metric_logql = '{job="debug_metrics"} | logfmt | container_name =~ "inventory-api|store-frontend" | usage_percent >= 90'
 
     while True:
-        errors = poller.fetch_recent_errors(logql_query)
+        # Fetch both streams
+        app_errors = poller.fetch_recent_errors(app_logql)
+        resource_spikes = poller.fetch_recent_errors(metric_logql)
         
-        for error in errors:
-            container_name = error["container"]
-            error_log = error["log"]
+        # Combine the context
+        all_issues = app_errors + resource_spikes
+        
+        for issue in all_issues:
+            container_name = issue.get("container", "inventory-api")
+            diagnostic_payload = issue["log"]
             
-            decision = decider.analyze_error(error_log, container_name)
+            # The LLM now receives either a stack trace OR a JSON hardware metric
+            decision = decider.analyze_error(diagnostic_payload, container_name)
             
-            if not decision:
-                continue
-                
-            if decision.action == "restart":
+            if decision and decision.action == "restart":
                 logger.warning(
                     {"container": container_name, "diagnosis": decision.diagnosis}, 
-                    "Transient fault detected. Intervening via Docker restart."
+                    "Intervening via Docker restart."
                 )
                 executor.restart_container(decision.target_container)
                 
-            elif decision.action == "log_only":
-                # The agent correctly identifies it shouldn't touch the code
+            elif decision and decision.action == "log_only":
                 logger.error(
                     {"container": container_name, "investigation_result": decision.diagnosis}, 
-                    "Application code fault detected. Intervention aborted. Engineer required."
+                    "Intervention aborted. Engineer required."
                 )
                 
         time.sleep(15)
