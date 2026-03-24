@@ -68,6 +68,44 @@ graph TB
     HA -.->|Executes Remediation| Docker_Compose_Environment
 ```
 
+## Observability & Dashboards
+
+This project uses **Log-Driven Observability**. Instead of traditional exporters, system metrics are extracted directly from container logs using **LogQL** metric queries.
+
+### Visualizing Metrics in Grafana
+
+To visualize the health of the **Echo-Store**, navigate to Grafana at `http://localhost:3001` and create a **Time series** panel using the following queries:
+
+#### 1\. Memory Usage (Bytes)
+
+Visualizes the actual memory footprint of each container in bytes.
+
+```logql
+avg_over_time({job="debug_metrics"} | logfmt | unwrap usage [1m]) by (container_name)
+```
+
+#### 2\. Memory Usage (%)
+
+Tracks memory consumption relative to the system limit.
+
+```logql
+avg_over_time({job="debug_metrics"} | logfmt | unwrap usage_percent [1m]) by (container_name)
+```
+
+#### 3\. CPU Usage (%)
+
+Visualizes CPU utilization derived from the `usage_percent` log field.
+
+```logql
+avg_over_time({job="debug_metrics"} | logfmt | unwrap usage_percent [1m]) by (container_name)
+```
+
+> [\!TIP]
+> **Panel Configuration:**
+>
+> - **Unit:** For Memory (Bytes), set the panel unit to `Data -> Bytes (IEC)`.
+> - **Legend:** Use `{{container_name}}` to distinguish between the frontend and API.
+
 ## Project Structure
 
 This monorepo separates the target application, the infrastructure configurations, and the automation agents.
