@@ -67,28 +67,12 @@ This project uses **Unified Log-Driven Metrics**. Instead of traditional exporte
 
 ### Visualizing Metrics in Grafana
 
-Navigate to Grafana at `http://localhost:3001` and create **Time series** panels using the following queries:
+Navigate to Grafana at `http://localhost:3001` and create **Time series** panels using the following query:
 
 **1. CPU Utilization (%)**
 
 ```logql
-avg by (container_name) (
-  last_over_time({job="debug_metrics", __name__="docker_container_cpu"}
-  | logfmt
-  | usage_percent != ""
-  | unwrap usage_percent [1m])
-)
-```
-
-**2. Memory Utilization (%)**
-
-```logql
-avg by (container_name) (
-  last_over_time({job="debug_metrics", __name__="docker_container_mem"}
-  | logfmt
-  | usage_percent != ""
-  | unwrap usage_percent [1m])
-)
+avg_over_time({job="debug_metrics"} | logfmt | usage_percent != "" | unwrap usage_percent [1m]) by (container_name)
 ```
 
 ## ⚡ Manual Fault Injection (Testing)
@@ -133,7 +117,7 @@ chaos-and-recovery-agent/
 1. **Clone the repository:**
 
    ```bash
-   git clone [https://github.com/sedna08/chaos-and-recovery-agent.git](https://github.com/sedna08/chaos-and-recovery-agent.git)
+   git clone https://github.com/sedna08/chaos-and-recovery-agent.git
    cd chaos-and-recovery-agent
    ```
 
@@ -150,7 +134,3 @@ chaos-and-recovery-agent/
    ```
 
 ---
-
-```
-
-```
