@@ -4,32 +4,33 @@
 
 ### 1.1 Purpose
 
-This document outlines the functional architecture and design for an Automated Chaos Engineering and Recovery System. It demonstrates advanced Site Reliability Engineering (SRE) capabilities by proactively injecting faults into a local two-tier microservices environment and autonomously diagnosing and remediating those faults using an LLM-driven agent.
+This document outlines the functional architecture and design for an Automated Chaos Engineering and Recovery System. It demonstrates advanced Site Reliability Engineering (SRE) capabilities by proactively injecting faults into a local two-tier Docker microservices environment and autonomously diagnosing and remediating those faults using an LLM-driven agent.
 
 ### 1.2 Scope
 
-The system operates entirely locally to ensure zero cloud cost. It utilizes Minikube for orchestration, a lightweight Echo-Store dummy application, a resource-optimized observability stack (VictoriaMetrics and Loki), a Python-based fault-injection engine (Chaos Agent), and an autonomous remediation engine (Healer Agent) powered by a local Large Language Model (LLM).
+The system operates entirely locally via **Docker Compose**. It utilizes a lightweight Echo-Store application (Next.js & FastAPI), a log-optimized observability stack (Grafana Loki & Promtail), a Python-based fault-injection engine (Chaos Agent), and an autonomous remediation engine (Healer Agent) powered by a local Large Language Model (**Ollama**).
 
 ## 2. System Overview
 
-The architecture follows a closed-loop control system model optimized for local execution on a personal workstation. The Echo-Store environment is continuously monitored for baseline health. The Chaos Agent perturbs the system by introducing faults into the backend API. The observability layer registers the degradation, triggering the Healer Agent. The Healer Agent aggregates telemetry, leverages a local LLM to perform root-cause analysis, and translates the LLM's diagnostic output into actionable Kubernetes API calls to restore the service.
+The architecture follows a closed-loop control system model. The Echo-Store environment is continuously monitored via container log streams. The Chaos Agent perturbs the system by introducing faults (e.g., container termination) into the `inventory-api`. The Healer Agent polls Loki for error signatures. Upon detection, it aggregates log context, leverages a local LLM to perform root-cause analysis, and executes **Docker SDK** commands to restore the service.
 
 ## 3. Component Architecture
 
-The following component diagram illustrates the high-level structural components of the system, highlighting the lightweight tools selected to preserve local CPU and memory resources.
+The following diagram illustrates the structural components and the simplified log-based data flow within the Docker network.
 
 ```mermaid
 graph TB
-    subgraph Minikube Cluster
+    subgraph Docker Compose Environment
         subgraph Echo-Store Application
-            Front[Store-Frontend]
-            Back[Inventory-API]
+            Front[Store-Frontend\nNext.js]
+            Back[Inventory-API\nFastAPI]
             Front -->|HTTP GET /api/stock| Back
         end
 
-        subgraph Observability Micro-Stack
-            VM[VictoriaMetrics\nMetrics]
-            Loki[Grafana Loki & Promtail\nLogs]
+        subgraph Log-Driven Observability
+            Loki[Grafana Loki\nLog Database]
+            Promtail[Promtail\nLog Scraper]
+            Graf[Grafana\nDashboard]
         end
     end
 
@@ -39,150 +40,131 @@ graph TB
 
     subgraph Autonomous Recovery Subsystem
         HA[Healer Agent\nPython Orchestrator]
-        LLM[Local LLM Brain\nOllama: Llama 3 / Mistral]
+        LLM[Local LLM Brain\nOllama]
     end
 
-    CA -->|Injects targeted faults| Back
-    Front -->|Emits HTTP metrics| VM
-    Back -->|Emits HTTP metrics| VM
-    Front -->|Emits stdout/stderr| Loki
-    Back -->|Emits stdout/stderr| Loki
-    VM -->|Triggers threshold alerts| HA
-    Loki -->|Provides error context| HA
-    HA -->|Prompts with context| LLM
-    LLM -->|Returns remediation commands| HA
-    HA -->|Executes Kubernetes API recovery| Minikube_Cluster
+    CA -->|1. Injects faults via Docker SDK| Back
+    Front -->|2. Emits stdout/stderr| Promtail
+    Back -->|2. Emits stdout/stderr| Promtail
+    Promtail -->|3. Pushes logs| Loki
+    Loki -->|4. Visualizes logs| Graf
+
+    HA -->|5. Polls for Errors| Loki
+    HA -->|6. Prompts with Context| LLM
+    LLM -->|7. Returns JSON Action| HA
+    HA -->|8. Executes Restart/Remediation| Docker_Compose_Environment
 ```
 
 ## 4. Functional Requirements
 
 ### 4.1 Target Environment (Echo-Store)
 
-- **Hosting:** Minikube running locally.
-- **Store-Frontend (Service A):** Exposes a `/products` endpoint. Makes synchronous calls to the backend. Returns 502/504 if the backend is unreachable.
-- **Inventory-API (Service B):** Exposes an `/api/stock` endpoint. Returns static JSON data. Acts as the primary target for chaos injection.
+- **Hosting:** Local Docker Engine via Docker Compose.
+- **Store-Frontend (Service A):** Next.js App Router service. Uses SSR to fetch backend data. Renders a "System Degraded" UI on failure.
+- **Inventory-API (Service B):** FastAPI service serving static JSON inventory data. Primary target for chaos injection.
 
 ### 4.2 Chaos Agent
 
-- **Fault Injection:** Capable of executing predefined fault profiles against the `Inventory-API` pod:
-  - _Compute:_ CPU spiking to trigger throttling.
-  - _State:_ Pod deletion or process termination.
-- **Scheduling:** Can trigger faults manually or on randomized intervals.
+- **Fault Injection:** Uses the Docker Python SDK to execute:
+  - _State Faults:_ Killing or pausing the `inventory-api` container.
+  - _Compute Faults:_ Artificially spiking CPU to induce latency logs.
+- **Scheduling:** Operates on manual triggers or randomized "Attack Phases."
 
-### 4.3 Observability Micro-Stack
+### 4.3 Observability Stack
 
-- **Metrics Gathering:** VictoriaMetrics to scrape node and application-level metrics with a low memory footprint.
-- **Log Aggregation:** Promtail and Grafana Loki to capture standard output/error logs efficiently without heavy text indexing.
-- **Alerting:** Configured thresholds in VictoriaMetrics (e.g., HTTP 500 rate > 5% on `Store-Frontend`) to trigger webhooks to the Healer Agent.
+- **Log Aggregation:** Promtail mounts `/var/run/docker.sock` to stream container logs to Loki.
+- **Log Storage:** Loki indexed by `container` name and `job` labels.
+- **Visualization:** Grafana provides real-time time-series graphs of error rates derived from log volume.
 
 ### 4.4 Healer Agent
 
-- **Ingestion:** Exposes a listener for VictoriaMetrics alerts.
-- **Context Gathering:** Automatically queries Loki for a trailing 5-minute window of logs surrounding the alert timestamp for both Echo-Store services.
-- **Execution:** Parses the JSON output from the LLM and executes the necessary Kubernetes Python Client commands (e.g., scaling replicas, restarting deployments).
+- **Detection:** Periodically polls Loki using LogQL (e.g., `{job="docker-stream"} |= "error"`).
+- **Diagnosis:** Fetches the 20 lines of logs surrounding an error and passes them to the local LLM.
+- **Remediation:** Executes Docker SDK commands (e.g., `container.restart()`) based on LLM output.
 
-### 4.5 Local LLM
+### 4.5 Local LLM (Ollama)
 
-- **Inference:** Hosted locally via Ollama to ensure low latency and zero API costs.
-- **System Prompting:** Configured with a strict persona to output machine-parsable remediation steps (JSON format containing the specific CLI/API command).
+- **Inference:** Hosted locally (zero cost).
+- **Persona:** Configured to output machine-readable JSON containing the `target_container` and `action_required`.
 
 ## 5. System Workflows
 
-### 5.1 System Interaction (Sequence Diagram)
+### 5.1 Request Lifecycle (Sequence Diagram)
 
-This diagram details the chronological interaction between components during a fault and recovery lifecycle focused on the Echo-Store application.
+This diagram details the interaction during a fault event and subsequent autonomous healing.
 
 ```mermaid
 sequenceDiagram
-    participant User as Client Traffic
-    participant App as Echo-Store (Front/Back)
-    participant Obs as Observability (VM/Loki)
-    participant Chaos as Chaos Agent
-    participant Healer as Healer Agent
-    participant Brain as Local LLM
+    participant CA as Chaos Agent
+    participant App as Inventory-API
+    participant Loki as Grafana Loki
+    participant HA as Healer Agent
+    participant LLM as Ollama
 
-    Chaos->>App: Kill Inventory-API Process
-    App-->>Obs: Logs connection refused, 502s spike
-    Obs->>Healer: Webhook Alert (Store-Frontend Degraded)
-    activate Healer
-    Healer->>Obs: Request Loki Logs (last 5 mins)
-    Obs-->>Healer: Log payload ("Connection to Inventory-API refused")
-    Healer->>Brain: Prompt (Alert + Log Context)
-    activate Brain
-    Brain-->>Healer: JSON Payload: {"action": "restart_deployment", "target": "inventory-api"}
-    deactivate Brain
-    Healer->>App: Execute kubectl rollout restart
-    App-->>Obs: Pods re-initialize, 200s return
-    Obs-->>Healer: Webhook Alert (Service Restored)
-    deactivate Healer
+    Note over CA, App: Chaos Phase
+    CA->>App: docker.kill()
+    App-->>Loki: [STDOUT] Container Terminated / 502 Bad Gateway
+
+    Note over HA, Loki: Detection Phase
+    loop Every 5 Seconds
+        HA->>Loki: Query: count_over_time({container="inventory-api"} |= "error")
+        Loki-->>HA: "Found 12 errors"
+    end
+
+    Note over HA, LLM: Healing Phase
+    HA->>Loki: Fetch logs for last 60s
+    Loki-->>HA: Log text payload
+    HA->>LLM: Prompt (Logs + System Context)
+    LLM-->>HA: JSON: {"action": "restart", "container": "inventory-api"}
+    HA->>App: docker.restart("inventory-api")
+    App-->>Loki: [STDOUT] Application startup complete
 ```
 
 ### 5.2 Healer Agent Internal Logic (Activity Flow Diagram)
 
-This diagram shows the internal state transitions and decision-making process of the Healer Agent.
-
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> IngestingAlert: Webhook Received from VictoriaMetrics
+    Idle --> Polling: Interval Reached
 
-    state IngestingAlert {
-        [*] --> FetchingLokiLogs
-        FetchingLokiLogs --> FormattingLLMPrompt
+    state Polling {
+        [*] --> CheckLoki
+        CheckLoki --> AnomalyDetected: Logs > Threshold
+        CheckLoki --> [*]: No Errors
     }
 
-    IngestingAlert --> Diagnosing: Prompt Ready
-    Diagnosing --> Executing: Valid JSON Command Generated
-    Diagnosing --> AlertingHuman: Parse Error / Unrecognized Issue
+    AnomalyDetected --> ContextGathering
+    ContextGathering --> LLM_Inference: Logs Sent to Ollama
 
-    state Executing {
-        [*] --> RunningK8sAPICommand
-        RunningK8sAPICommand --> AwaitingTelemetry
-    }
+    LLM_Inference --> ActionExecution: Valid JSON Received
+    LLM_Inference --> AlertAdmin: Unclear Diagnosis
 
-    Executing --> Validating: Timeout Reached
-
-    state Validating {
-        [*] --> CheckingVictoriaMetrics
-    }
-
-    Validating --> Idle: System Healthy (200 OKs)
-    Validating --> Diagnosing: System Still Degraded (Retry)
+    ActionExecution --> Cooldown: Service Restarted
+    Cooldown --> Idle: Wait 30s
 ```
 
 ## 6. Operational Flow
 
-The following flowchart illustrates the overarching lifecycle of the entire system from deployment to steady-state operations.
-
 ```mermaid
 flowchart TD
-    Start([Initialize System]) --> DeployK8s[Start Minikube Cluster]
-    DeployK8s --> DeployObs[Deploy VictoriaMetrics & Loki]
-    DeployObs --> DeployApp[Deploy Echo-Store Application]
-    DeployApp --> DeployAgents[Start Healer Agent & Ollama]
-    DeployAgents --> SteadyState{System Healthy?}
+    Start([Initialize System]) --> ComposeUp[docker compose up -d]
+    ComposeUp --> Monitor[Healer Agent Starts Polling]
+    Monitor --> SteadyState{System Healthy?}
 
-    SteadyState -->|Yes| Wait[Monitor Traffic]
-    Wait --> TriggerChaos[Chaos Agent Injects Fault]
-    TriggerChaos --> SteadyState
+    SteadyState -->|Yes| Wait[Wait]
+    SteadyState -->|No| Detect[Loki Query returns > 0 Errors]
 
-    SteadyState -->|No| Detect[VictoriaMetrics Detects Anomaly]
-    Detect --> Gather[Healer Queries Loki for Logs]
-    Gather --> Query[Healer Prompts LLM]
+    Detect --> Brain[LLM Analyzes Log Pattern]
+    Brain --> Fix[Healer Executes Docker SDK Action]
+    Fix --> Verify[Healer Verifies 200 OK via Logs]
 
-    Query --> ParseCheck{Valid JSON Action?}
-    ParseCheck -->|Yes| ApplyFix[Execute K8s API Remediation]
-    ParseCheck -->|No| Fallback[Notify Admin / Abort]
-
-    ApplyFix --> Verify[Verify Resolution via Metrics]
-    Verify -->|Resolved| Wait
-    Verify -->|Failed| Query
-    Fallback --> Wait
+    Verify -->|Resolved| SteadyState
+    Verify -->|Failed| Brain
 ```
 
 ## 7. Non-Functional Requirements
 
-- **Resource Constraints:** The entire stack must operate within the memory constraints of a standard Windows PC. The Echo-Store microservices must consume < 50MB RAM each, and the observability stack must be tuned for minimal retention to prevent swapping.
-- **Latency:** The total time from alert generation to remediation execution should not exceed 30 seconds to prevent cascading failures.
-- **Safety Boundaries:** The Healer agent must use Role-Based Access Control (RBAC) restricted to a specific namespace to prevent cluster-wide modifications.
-- **Idempotency:** Remediation commands executed via the Kubernetes API must be idempotent to avoid compounding errors if executed multiple times.
+- **Resource Preservation:** Dropping VictoriaMetrics and Minikube reduces the RAM footprint by ~3GB, ensuring Ollama has sufficient priority.
+- **Latency:** The "Detection to Remediation" loop should complete in under 15 seconds.
+- **Security:** The Healer Agent requires access to the Docker Socket but is restricted to the specific Docker Network `chaos-net`.
+- **Idempotency:** Remediation actions must be safe to run multiple times (e.g., restarting a container that is already starting).
