@@ -10,7 +10,7 @@ services:
   # -----------------------------------------
   inventory-api:
     build: 
-      context: ../services/inventory-api
+      context: ./services/inventory-api
       dockerfile: Dockerfile
     container_name: inventory-api
     networks:
@@ -22,7 +22,7 @@ services:
 
   store-frontend:
     build: 
-      context: ../services/store-frontend
+      context: ./services/store-frontend
       dockerfile: Dockerfile
     container_name: store-frontend
     networks:
@@ -47,15 +47,34 @@ services:
     volumes:
       - ./infra/monitoring/loki-config.yaml:/etc/loki/local-config.yaml
     networks:
-      - chaos-net
+      chaos-net:
+        aliases:
+          - loki-internal
 
   promtail:
     image: grafana/promtail:2.9.1
     container_name: promtail
+    user: root
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/monitoring/promtail-config.yml:/etc/promtail/config.yml
     command: -config.file=/etc/promtail/config.yml
+    networks:
+      - chaos-net
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./infra/monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
     networks:
       - chaos-net
     depends_on:
