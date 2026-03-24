@@ -44,6 +44,6 @@ This project utilizes [uv](https://github.com/astral-sh/uv) for lightning-fast d
 
 1. Clone the repository:
    ```bash
-   git clone <your-repo-url>
-   cd inventory-api
+   git clone https://github.com/sedna08/chaos-and-recovery-agent.git
+   cd services/inventory-api
    ```

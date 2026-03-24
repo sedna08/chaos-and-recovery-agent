@@ -51,8 +51,8 @@ This project utilizes standard Node.js package management.
 1. Clone the repository:
 
    ```bash
-   git clone <your-repo-url>
-   cd store-frontend
+   git clone https://github.com/sedna08/chaos-and-recovery-agent.git
+   cd services/store-frontend
    ```
 
 2. Install dependencies:
