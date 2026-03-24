@@ -1,0 +1,62 @@
+version: '3.8'
+
+networks:
+  chaos-net:
+    driver: bridge
+
+services:
+  # -----------------------------------------
+  # Target Application
+  # -----------------------------------------
+  inventory-api:
+    build: 
+      context: ../services/inventory-api
+      dockerfile: Dockerfile
+    container_name: inventory-api
+    networks:
+      - chaos-net
+    ports:
+      - "8000:8000"
+    labels:
+      - "chaos-target=true"
+
+  store-frontend:
+    build: 
+      context: ../services/store-frontend
+      dockerfile: Dockerfile
+    container_name: store-frontend
+    networks:
+      - chaos-net
+    ports:
+      - "3000:3000"
+    environment:
+      # Docker's internal DNS maps the service name 'inventory-api' to its container IP
+      - INVENTORY_API_URL=http://inventory-api:8000
+    depends_on:
+      - inventory-api
+
+  # -----------------------------------------
+  # Observability Micro-Stack
+  # -----------------------------------------
+  loki:
+    image: grafana/loki:2.9.1
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./infra/monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      - chaos-net
+
+  promtail:
+    image: grafana/promtail:2.9.1
+    container_name: promtail
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/monitoring/promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - chaos-net
+    depends_on:
+      - loki
