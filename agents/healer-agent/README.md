@@ -1,136 +1,133 @@
 <div align="center">
 
-# Automated Chaos Engineering & Recovery System
+# 🩹 Functional Design Document: Infrastructure Healer Agent
 
-_A closed-loop autonomous ecosystem demonstrating advanced Site Reliability Engineering (SRE) and AI-driven DevOps principles._
+_The autonomous Tier-1 responder for the chaos-and-recovery-agent ecosystem._
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-15+-black.svg?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Docker](https://img.shields.io/badge/Docker-SDK-2496ED.svg?style=flat-square&logo=docker&logoColor=white)](https://docker-py.readthedocs.io/)
 [![Observability](https://img.shields.io/badge/Grafana-Loki-F46800.svg?style=flat-square&logo=grafana&logoColor=white)](https://grafana.com/oss/loki/)
+[![Local AI](https://img.shields.io/badge/Ollama-LLM-white.svg?style=flat-square&logo=ollama&logoColor=black)](https://ollama.com/)
 
 </div>
 
-> **⚠️ Disclaimer: Active Development** > The target microservices environment (Echo-Store), the log-driven observability infrastructure, and the autonomous **Healer Agent** are fully operational. The Python-based **Chaos Agent** (automated fault injection) is currently under active development.
-
 ---
 
-## 📖 About the Project
+## 📖 Introduction
 
-This monorepo houses a complete, zero-cost, local engineering environment designed to prove that Local Large Language Models (LLMs) can be securely integrated into operational pipelines to handle Level 1 / Level 2 incident response autonomously.
+### 🎯 Purpose
 
-The environment consists of a dummy application ("Echo-Store") monitored by a unified telemetry stack. The standout feature is the **Healer Agent**, an autonomous first responder that uses the **Observe-Orient-Decide-Act (OODA)** loop. It tails container logs and hardware metrics, feeds the error context to a local instance of Ollama, and executes Docker SDK commands to restore the system—ensuring absolute privacy with **zero data exfiltration**.
+This document outlines the functional design for the `healer-agent` microservice. As the autonomous Tier-1 responder of the ecosystem, its primary role is to continuously monitor system telemetry, diagnose application faults using a local Large Language Model (LLM), and perform infrastructure-level interventions to mitigate transient failures.
 
-## 🏗️ System Architecture
+### 🔭 Scope
 
-The architecture uses a **Sanitized Telemetry Pipeline** where metrics and logs share a unified Loki backend. The Healer Agent is strictly scoped to infrastructure interventions and will safely escalate logical code bugs without altering source code.
+The service is strictly scoped to **infrastructure orchestration and diagnostic observability**. It operates as a localized watchdog, executing interventions such as container restarts to resolve operational timeouts or resource starvation.
+
+It explicitly **does not** modify, patch, or alter application source code. Hard-coded logical bugs are escalated to human engineers via structured JSON logs.
+
+## 🛠️ Technology Stack
+
+The agent utilizes a modern, typed, and localized Python stack to ensure zero data exfiltration:
+
+- **Language:** Python 3.12+
+- **Dependency Management:** `uv`
+- **AI Inference:** Ollama SDK (Local LLM execution, e.g., `llama3.2`)
+- **Container Orchestration:** Docker SDK for Python
+- **Telemetry Ingestion:** HTTPX (Polling Grafana Loki API)
+- **Data Validation:** Pydantic (Enforcing LLM JSON action schemas)
+- **Testing & Linting:** Pytest and Ruff
+
+## 🏗️ Component Architecture
+
+The application follows an event-driven, decoupled architectural pattern based on the **Observe-Orient-Decide-Act (OODA)** loop. Each phase is isolated into specific client modules to ensure single-responsibility and testability.
 
 ```mermaid
 graph TB
-    subgraph Docker Compose Environment
-        subgraph Echo-Store Application
-            Front["Store-Frontend\nNext.js"]
-            Back["Inventory-API\nFastAPI"]
-            Front -->|HTTP GET /api/stock| Back
-        end
+    subgraph Healer-Agent Microservice
+        Main[OODA Loop Controller\n`main.py`]
 
-        subgraph Unified Observability
-            Loki["Grafana Loki\nLog Database"]
-            Promtail["Promtail\nApplication Logs"]
-            Telegraf["Telegraf\nInfrastructure Metrics"]
-            Graf["Grafana\nDashboard"]
-        end
+        Poller[LokiClient\n`loki_client.py`]
+        Decider[LLMClient\n`llm_client.py`]
+        Exec[DockerClient\n`docker_client.py`]
+
+        Main -->|1. Observe| Poller
+        Main -->|2. Orient/Decide| Decider
+        Main -->|3. Act| Exec
     end
 
-    subgraph Autonomous Recovery Subsystem
-        HA["Healer Agent\nPython (OODA Loop)"]
-        LLM["Local LLM Brain\nOllama"]
+    Loki[(Grafana Loki)]
+    Ollama[Local Ollama]
+    Docker[Docker Daemon]
+
+    Poller <-->|LogQL via HTTPX| Loki
+    Decider <-->|System Prompt + Context| Ollama
+    Exec <-->|Container Management| Docker
+```
+
+## 🔄 OODA Loop Implementation Details
+
+### 1️⃣ Observe (`loki_client.py`)
+
+The agent maintains an active polling loop against the Grafana Loki endpoint (`http://localhost:3100`). It executes predefined LogQL queries to detect anomalies:
+
+- **Application Exceptions:** `{container=~"inventory-api|store-frontend"} |= "Exception"`
+- **Hardware Starvation:** Parses `logfmt` metrics pushed by Telegraf, looking for CPU or Memory `usage_percent` crossing the 90% threshold.
+
+### 2️⃣ Orient & Decide (`llm_client.py`)
+
+Upon intercepting an anomaly, the agent aggregates the recent log context and forwards it to the local Ollama model. The prompt instructs the LLM to act as a diagnostic engine and return a strictly formatted JSON response validated by Pydantic models.
+
+- **Valid Decisions:** `"restart"` (for transient/hardware issues) or `"escalate"` (for hard-coded application errors).
+
+### 3️⃣ Act (`docker_client.py`)
+
+The decision is parsed into a `RemediationAction` object. If the action is a restart, the agent interfaces with the local Docker daemon via the Python SDK to restart the target container. Structured JSON logs are emitted at each step for system observability.
+
+## 🛤️ Internal Workflows
+
+### Remediation Sequence
+
+```mermaid
+sequenceDiagram
+    participant Main as OODA Controller
+    participant Loki as LokiClient
+    participant LLM as LLMClient
+    participant Docker as DockerClient
+
+    loop Continuous Polling
+        Main->>Loki: poll_logs(query)
+        Loki-->>Main: Return log batch
     end
 
-    Front -->|Emits stdout/stderr| Promtail
-    Back -->|Emits stdout/stderr| Promtail
-    Promtail -->|Pushes logs| Loki
+    Note over Main, Loki: Anomaly Detected
+    Main->>LLM: evaluate_context(logs, container)
+    LLM-->>Main: RemediationAction(action="restart", container="inventory-api")
 
-    Telegraf -->|Scrapes Docker Stats| Loki
-    Loki -->|Visualizes Metrics| Graf
-
-    HA -.->|Observe: Polls Loki via HTTPX| Loki
-    HA -.->|Orient: Pydantic Schema Prompt| LLM
-    LLM -.->|Decide: Return JSON Action| HA
-    HA -.->|Act: Execute SDK Restart / Log| Docker_Compose_Environment
+    Main->>Main: Emit structured log (Action initiated)
+    Main->>Docker: restart_container("inventory-api")
+    Docker-->>Main: Success
+    Main->>Main: Emit structured log (Cooldown started)
 ```
 
-## 📊 Observability & Dashboards
+## 📂 Project Directory Structure
 
-This project uses **Unified Log-Driven Metrics**. Instead of traditional exporters, system metrics are extracted from Telegraf's `logfmt` stream in Loki using precise LogQL unwrap queries.
-
-### Visualizing Metrics in Grafana
-
-Navigate to Grafana at `http://localhost:3001` and create **Time series** panels using the following query:
-
-**1. CPU Utilization (%)**
-
-```logql
-avg_over_time({job="debug_metrics"} | logfmt | usage_percent != "" | unwrap usage_percent [1m]) by (container_name)
-```
-
-## ⚡ Manual Fault Injection (Testing)
-
-To verify the Healer Agent's OODA loop, manually trigger faults from your terminal. Ensure the Healer Agent is running (`uv run python -m src.main` in the `healer-agent` directory).
-
-| Test Profile        | Command                                                                                                                                                   | Expected Healer Action                                                  |
-| :------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| **CPU Starvation**  | `docker exec -d inventory-api stress-ng --cpu 4 --timeout 60`                                                                                             | Detects metric spike -> Diagnoses starvation -> **Restarts Container**  |
-| **Memory Leak**     | `docker exec -d store-frontend stress-ng --vm 1 --vm-bytes 500M --vm-populate --vm-hang 0 --temp-path /tmp --timeout 60`                                  | Detects RAM spillage -> Diagnoses OOM risk -> **Restarts Container**    |
-| **Code Escalation** | `docker exec inventory-api sh -c 'echo "ERROR: Exception: TypeError: unsupported operand type(s) for +: int and str in core.py line 112" > /proc/1/fd/1'` | Catches explicit error -> Diagnoses logical bug -> **Logs & Escalates** |
-
-## 📂 Project Structure
+The following tree represents the internal structure of the `healer-agent/` directory. It explicitly separates external integrations (Docker, LLM, Loki) into single-responsibility modules to facilitate isolated unit testing.
 
 ```text
-chaos-and-recovery-agent/
-├── agents/                      # Python AI and Automation scripts
-│   ├── chaos-agent/             # (In Development) Automated fault injection
-│   └── healer-agent/            # Live OODA loop responder (Loki -> Ollama -> Docker)
-│
-├── infra/                       # Docker Compose and monitoring configuration
-│   └── monitoring/              # Promtail, Loki, Telegraf, and Grafana configs
-│
-├── services/                    # Target microservices
-│   ├── inventory-api/           # FastAPI backend
-│   └── store-frontend/          # Next.js SSR frontend
-│
-├── docker-compose.yml           # Core infrastructure definition
-└── README.md                    # Project documentation
+healer-agent/
+├── pyproject.toml               # Configuration for Ruff, Pytest, and dependencies
+├── uv.lock                      # Deterministic dependency resolution
+├── src/                         # Main application source code
+│   ├── __init__.py
+│   ├── main.py                  # Core OODA loop implementation
+│   ├── models.py                # Pydantic schemas (RemediationAction)
+│   ├── logger.py                # Structured JSON logging utility
+│   ├── loki_client.py           # HTTP polling and cursor management
+│   ├── llm_client.py            # Ollama interface and prompt engineering
+│   └── docker_client.py         # Infrastructure intervention execution
+└── tests/                       # Unit test directory
+    ├── __init__.py
+    ├── test_loki_client.py      # Mocks HTTPX and verifies cursor logic
+    ├── test_llm_client.py       # Mocks Ollama and verifies Pydantic parsing
+    └── test_docker_client.py    # Mocks Docker daemon interactions
 ```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Docker Desktop** (or Docker Engine + Compose plugin)
-- **Python 3.12+** (`uv` package manager recommended)
-- **Ollama** (Running locally with your preferred model)
-
-### Installation & Launch
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/sedna08/chaos-and-recovery-agent.git
-   cd chaos-and-recovery-agent
-   ```
-
-2. **Launch Infrastructure:**
-
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Start the Healer Agent:**
-   ```bash
-   cd agents/healer-agent
-   uv run python -m src.main
-   ```
-
----
